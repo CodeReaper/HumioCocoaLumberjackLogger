@@ -7,7 +7,7 @@ Pod::Spec.new do |s|
   s.authors   = { 'Jimmy Juncker' => '' }
   s.source = { :git => 'https://github.com/jjuncker/HumioCocoaLumberjackLogger', :tag => s.version }
 
-  s.ios.deployment_target = '8.0'
+  s.ios.deployment_target = '9.0'
   s.source_files = 'Classes/*.swift'
   s.dependency 'CocoaLumberjack/Swift', '~> 3.6.0'
   
