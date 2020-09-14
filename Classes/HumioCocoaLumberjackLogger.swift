@@ -4,7 +4,6 @@
 //
 //  Created by Jimmy Juncker on 06/06/16.
 //
-
 import UIKit
 import CocoaLumberjack
 import CoreFoundation
@@ -24,6 +23,7 @@ public struct HumioLoggerConfiguration {
 
 public protocol HumioLogger: DDLogger  {
     var verbose: Bool { get set }
+    func appWillTerminate()
 }
 
 public class HumioLoggerFactory {
@@ -77,7 +77,7 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
     // https://github.com/CocoaLumberjack/CocoaLumberjack/issues/643
     //
     private var internalLogFormatter: DDLogFormatter?
-    
+
     override internal var logFormatter: DDLogFormatter! {
         set {
             super.logFormatter = newValue
@@ -88,7 +88,7 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
         }
     }
     // ###########################################################################
-    
+
     init(accessToken:String?=nil, dataSpace:String?=nil, serviceUrl:URL? = nil, additionalAttributes:[String:String] = [:], loggerId:String, tags:[String:String], configuration:HumioLoggerConfiguration) {
         self.loggerId = loggerId
 
@@ -123,9 +123,9 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.allowsCellularAccess = configuration.allowsCellularAccess
         sessionConfiguration.timeoutIntervalForResource = timeout
-        
+
         self.cache = [Any]()
-        
+
         self.cacheQueue = OperationQueue()
         cacheQueue.qualityOfService = .background
         cacheQueue.maxConcurrentOperationCount = 1
@@ -161,6 +161,8 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
         DispatchQueue.main.async {
             self.timer = Timer.scheduledTimer(timeInterval: self.postFrequency, target: self, selector: #selector(self.ingest), userInfo: nil, repeats: true)
         }
+
+        NotificationCenter.default.addObserver(self, selector: #selector(appWillTerminate), name: UIApplication.willTerminateNotification, object: nil)
     }
 
     override func log(message: DDLogMessage) {
@@ -189,37 +191,49 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
     override func flush() {
         self.session.flush {}
     }
+
+    @objc func appWillTerminate() {
+        if self._verbose {
+            print("HumioCocoaLumberjackLogger: App will terminate, queueing logs")
+        }
+
+        queueLogs()
+    }
 }
 
 private extension HumioCocoaLumberjackLogger {
-    @objc func ingest() {
+    @objc private func ingest() {
         offloadingQueue.addOperation {
-            defer {
-                self.cacheQueue.isSuspended = false
-            }
-            self.cacheQueue.isSuspended = true
+            self.queueLogs()
+        }
+    }
 
-            let eventsToPost = [Any](self.cache)
-            guard
-                eventsToPost.count != 0,
-                let data = self.requestData(for: eventsToPost)
-                else { return }
+    private func queueLogs() {
+        defer {
+            self.cacheQueue.isSuspended = false
+        }
+        self.cacheQueue.isSuspended = true
 
+        let eventsToPost = [Any](self.cache)
+        guard
+            eventsToPost.count != 0,
+            let data = self.requestData(for: eventsToPost)
+            else { return }
+
+        if self._verbose {
+            print("HumioCocoaLumberjackLogger: Preparing to send \(eventsToPost.count) events.")
+        }
+
+        let id = UUID().uuidString
+        let dataFile = self.file(for: id)
+        do {
+            try? FileManager.default.createDirectory(at: dataFile.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+            try data.write(to: dataFile)
+            self.cache.removeAll()
+            self.send(request: id, with: dataFile)
+        } catch {
             if self._verbose {
-                print("HumioCocoaLumberjackLogger: Preparing to send \(eventsToPost.count) events.")
-            }
-
-            let id = UUID().uuidString
-            let dataFile = self.file(for: id)
-            do {
-                try? FileManager.default.createDirectory(at: dataFile.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
-                try data.write(to: dataFile)
-                self.cache.removeAll()
-                self.send(request: id, with: dataFile)
-            } catch {
-                if self._verbose {
-                    print("HumioCocoaLumberjackLogger: Failed to write data to file, error: \(error.localizedDescription)")
-                }
+                print("HumioCocoaLumberjackLogger: Failed to write data to file, error: \(error.localizedDescription)")
             }
         }
     }
@@ -249,6 +263,10 @@ private extension HumioCocoaLumberjackLogger {
     }
 
     private func send(request id: String, with file: URL) {
+        if self._verbose {
+            print("HumioCocoaLumberJackLogger: sending request with id=\(id)")
+        }
+
         var request = URLRequest(url: humioServiceUrl, cachePolicy: cachePolicy, timeoutInterval: timeout)
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -298,7 +316,7 @@ final class SimpleHumioLogFormatter: NSObject, DDLogFormatter {
     func format(message: DDLogMessage) -> String? {
         return "logLevel=\(self.logLevelString(message)) filename='\(message.fileName)' line=\(message.line) \(message.message)"
     }
-    
+
     func logLevelString(_ logMessage: DDLogMessage) -> String {
         let logLevel: String
         let logFlag = logMessage.flag
