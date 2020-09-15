@@ -3,7 +3,7 @@
 
 ##### Swift version via CocoaPods
 ```ruby
-platform :ios, '9.0'
+platform :ios, '10.0'
 use_frameworks!
 
 pod 'HumioCocoaLumberjackLogger', :git => "https://github.com/jjuncker/HumioCocoaLumberjackLogger.git"
