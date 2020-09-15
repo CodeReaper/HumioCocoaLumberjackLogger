@@ -3,8 +3,8 @@ import CocoaLumberjack
 import CoreFoundation
 
 public struct HumioLoggerConfiguration {
-    public var postFrequency:TimeInterval = 10
-    public var maximumQueueTime:TimeInterval = 3600
+    public var postFrequency: TimeInterval = 10
+    public var maximumQueueTime: TimeInterval = 3600
     public var allowsCellularAccess = true
     public var ommitEscapeCharacters = false
 
@@ -13,21 +13,30 @@ public struct HumioLoggerConfiguration {
     }
 }
 
-public protocol HumioLogger: DDLogger  {
+public protocol HumioLogger: DDLogger {
     func appWillTerminate()
     func handleEvents(for identifier: String, with completion: @escaping () -> Void)
 }
 
 public class HumioLoggerFactory {
-    public class func createLogger(serviceUrl:URL? = nil, accessToken:String?=nil, dataSpace:String?=nil, additionalAttributes:[String:String] = [:], loggerId:String=NSUUID().uuidString, tags:[String:String] = HumioLoggerFactory.defaultTags(), configuration:HumioLoggerConfiguration=HumioLoggerConfiguration.defaultConfiguration(), verbose: Bool = false) -> HumioLogger {
-        return HumioCocoaLumberjackLogger(accessToken: accessToken, dataSpace: dataSpace, serviceUrl:serviceUrl, additionalAttributes:additionalAttributes, loggerId:loggerId, tags: tags, configuration: configuration, verbose: verbose)
+    public class func createLogger(
+        serviceUrl: URL? = nil,
+        accessToken: String? = nil,
+        dataSpace: String? = nil,
+        additionalAttributes: [String: String] = [:],
+        loggerId: String = NSUUID().uuidString,
+        tags: [String: String] = HumioLoggerFactory.defaultTags(),
+        configuration: HumioLoggerConfiguration = HumioLoggerConfiguration.defaultConfiguration(),
+        verbose: Bool = false
+    ) -> HumioLogger {
+        return HumioCocoaLumberjackLogger(accessToken: accessToken, dataSpace: dataSpace, serviceUrl: serviceUrl, additionalAttributes: additionalAttributes, loggerId: loggerId, tags: tags, configuration: configuration, verbose: verbose)
     }
 
-    public class func defaultTags() -> [String:String] {
+    public class func defaultTags() -> [String: String] {
         return [
-            "platform":"ios",
+            "platform": "ios",
             "bundleIdentifier": (Bundle.main.object(forInfoDictionaryKey: "CFBundleIdentifier") ?? "unknown") as! String,
-            "source":HumioCocoaLumberjackLogger.LOGGER_NAME
+            "source": HumioCocoaLumberjackLogger.LOGGER_NAME
         ]
     }
 }
@@ -36,33 +45,32 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
     fileprivate static let LOGGER_NAME = "MobileDeviceLogger"
     private static let HUMIO_ENDPOINT_FORMAT = "https://cloud.humio.com/api/v1/dataspaces/%@/ingest"
 
-    private let loggerId:String
+    private let loggerId: String
     private let logs: URL
-    private let accessToken:String
+    private let accessToken: String
 
-    private let humioServiceUrl:URL
-    private let tags:[String:String]
-    private let postFrequency:TimeInterval
-    private let maximumQueueTime:TimeInterval
-    private let attributes:[String:String]
-    private let ommitEscapeCharacters:Bool
+    private let humioServiceUrl: URL
+    private let tags: [String: String]
+    private let postFrequency: TimeInterval
+    private let maximumQueueTime: TimeInterval
+    private let attributes: [String: String]
+    private let ommitEscapeCharacters: Bool
 
-    private let identifier = "\(Bundle.main.bundleIdentifier!).humio-logger"
+    private let identifier = "\(Bundle.main.bundleIdentifier ?? "unknown").humio-logger"
     private let bundleVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "unknown") as! String
     private let bundleShortVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "unknown") as! String
     private let deviceSystemVersion = UIDevice.current.systemVersion
-    private let deviceModel:String
+    private let deviceModel: String
 
     private let log: OSLog
 
     private let offloadingQueue = OperationQueue()
-    private let cacheQueue:OperationQueue
-    private var timer:Timer?
+    private let cacheQueue: OperationQueue
+    private var timer: Timer?
     private var session = URLSession()
 
     internal var completions: [() -> Void] = []
-    internal var cache:[Any]
-
+    internal var cache: [Any]
 
     // ###########################################################################
     // Fails when formatting using the logformatter from parent
@@ -82,13 +90,13 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
     }
     // ###########################################################################
 
-    init(accessToken:String?=nil, dataSpace:String?=nil, serviceUrl:URL? = nil, additionalAttributes:[String:String] = [:], loggerId:String, tags:[String:String], configuration:HumioLoggerConfiguration, verbose: Bool) {
+    init(accessToken: String?, dataSpace: String?, serviceUrl: URL?, additionalAttributes: [String: String] = [:], loggerId: String, tags: [String: String], configuration: HumioLoggerConfiguration, verbose: Bool) {
         self.loggerId = loggerId
 
-        var setToken:String? = accessToken
+        var setToken: String? = accessToken
         setToken = setToken ?? Bundle.main.infoDictionary!["HumioAccessToken"] as? String
 
-        var setSpace:String? = dataSpace
+        var setSpace: String? = dataSpace
         setSpace = setSpace ?? Bundle.main.infoDictionary!["HumioDataSpace"] as? String
 
         guard let space = setSpace, let token = setToken, space.count > 0 && token.count > 0 else {
@@ -119,7 +127,13 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
         cacheQueue.qualityOfService = .background
         cacheQueue.maxConcurrentOperationCount = 1
 
-        var attributes:[String: String] = ["loggerId":self.loggerId, "CFBundleVersion":self.bundleVersion, "CFBundleShortVersionString":self.bundleShortVersion, "systemVersion":self.deviceSystemVersion, "deviceModel":self.deviceModel]
+        var attributes: [String: String] = [
+            "loggerId": self.loggerId,
+            "CFBundleVersion": self.bundleVersion,
+            "CFBundleShortVersionString": self.bundleShortVersion,
+            "systemVersion": self.deviceSystemVersion,
+            "deviceModel": self.deviceModel
+        ]
         for (key, value) in additionalAttributes {
             attributes[key] = value
         }
@@ -127,7 +141,7 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
 
         logs = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
 
-        log = verbose ? OSLog(subsystem: Bundle.main.bundleIdentifier!, category: "humio-logger") : OSLog.disabled
+        log = verbose ? OSLog(subsystem: Bundle.main.bundleIdentifier ?? "unknown", category: "humio-logger") : OSLog.disabled
 
         super.init()
         os_log("initialized", log: log)
@@ -166,11 +180,12 @@ class HumioCocoaLumberjackLogger: DDAbstractLogger {
             messageText = formatted
         }
 
-        let event = ["timestamp":Date().timeIntervalSince1970*1000, //ms
-                     "kvparse":true,
-                     "attributes":self.attributes,
-                     "rawstring":ommitEscapeCharacters ? messageText.replacingOccurrences(of: "\\", with: "") : messageText
-                    ] as [String : Any]
+        let event = [
+            "timestamp": Date().timeIntervalSince1970*1000, //ms
+            "kvparse": true,
+            "attributes": self.attributes,
+            "rawstring": ommitEscapeCharacters ? messageText.replacingOccurrences(of: "\\", with: "") : messageText
+            ] as [String: Any]
 
         self.cacheQueue.addOperation {
             self.cache.append(event)
@@ -242,7 +257,7 @@ private extension HumioCocoaLumberjackLogger {
             "events": events
             ]]
         do {
-            return try JSONSerialization.data(withJSONObject: jsonDict, options:[])
+            return try JSONSerialization.data(withJSONObject: jsonDict, options: [])
         } catch {
             os_log("Failed to create data for humio. Most likely the JSON is invalid: %s", log: log, "\(jsonDict)")
             return nil
